@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Weekly cost and security report for one AWS account and region.
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Email address that receives the report.
+  RequiredTags:
+    Type: String
+    Default: Owner,Project
+    Description: Comma-separated tag keys every EC2 instance must have.
+
+Resources:
+  ReportTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  AuditFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: audit.handler
+      Runtime: python3.12
+      CodeUri: src/
+      Timeout: 120
+      MemorySize: 128
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref ReportTopic
+          REQUIRED_TAGS: !Ref RequiredTags
+      Policies:
+        # read-only: the function reports problems, it never changes anything
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:DescribeInstances
+                - ec2:DescribeVolumes
+                - ec2:DescribeAddresses
+                - ec2:DescribeSecurityGroups
+                - s3:ListAllMyBuckets
+                - s3:GetBucketPublicAccessBlock
+              Resource: "*"
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt ReportTopic.TopicName
+      Events:
+        Weekly:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 8 ? * MON *)   # Mondays at 08:00 UTC
+            Description: Weekly cost and security report
